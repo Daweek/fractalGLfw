@@ -39,8 +39,8 @@ typedef struct mp
 mapping   *d_map;
 
 extern "C"
-void malloCUDA(mapping *mapped){
-  std::cout<<"Malloc time...\n";
+void interopCUDA(){
+  std::cout<<"Seting up CUDA-OpenGL buffer...\n";
   // Prepare graphics interoperability
   if(g_structMapVBO != NULL) checkCudaErrors(cudaGraphicsUnregisterResource(g_structMapVBO));
 
@@ -57,12 +57,32 @@ void malloCUDA(mapping *mapped){
   // Register CUDA and OpenGL Interop
   checkCudaErrors(cudaGraphicsGLRegisterBuffer(&g_structMapVBO,g_mapVBO,cudaGraphicsMapFlagsNone));
 
+}
+
+extern "C"
+void malloCUDA(mapping *mapped){
+  //std::cout<<"Malloc time...\n";
   // Send all parameters to GPU
   checkCudaErrors(cudaFree(d_map));
   checkCudaErrors(cudaMalloc((void**)&d_map,5*sizeof(mapping)));
   checkCudaErrors(cudaMemcpy(d_map,mapped,5*sizeof(mapping),cudaMemcpyHostToDevice));
 
 }
+
+__global__ void kernel_test(float4* d_pointData, int numPoints,mapping *d_mappings, int numMappings)
+{
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  //int stride = blockDim.x * gridDim.x;
+
+  int currentTarget = index % numMappings;
+
+  d_pointData[index].x = 0.0f + currentTarget/10.0f;
+  d_pointData[index].y = - 0.7f - currentTarget/10.0f;
+  //d_pointData[index].x = 0.0f;
+  //d_pointData[index].y = 0.0f;
+
+}
+
 
 __global__ void kernel(float4* d_pointData, int numPoints,mapping *d_mappings, int numMappings)
 {
@@ -78,6 +98,7 @@ __global__ void kernel(float4* d_pointData, int numPoints,mapping *d_mappings, i
   extern __shared__ mapping maps[];
   if(threadIdx.x == 0)
   {
+    #pragma unroll
     for(int i = 0; i < numMappings; i++)
         maps[i] = d_mappings[i];
   }
@@ -126,6 +147,7 @@ __global__ void kernel(float4* d_pointData, int numPoints,mapping *d_mappings, i
                     maps[currentTarget].y;
     currentPosition = newPosition;
   }
+
 }
 
 extern "C"
@@ -143,6 +165,10 @@ void generateFractal(){
   
     kernel<<<numBlocks, blockSize, numMappings * sizeof(mapping)>>>
       ((float4*)d_glmap, numPoints, d_map, numMappings);
+
+    //kernel_test<<<numBlocks, blockSize, numMappings * sizeof(mapping)>>>
+    //  ((float4*)d_glmap, numPoints, d_map, numMappings);
+
   
   checkCudaErrors( cudaEventRecord(stop) );
 

@@ -2,9 +2,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <math.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <sstream>
+#include <iomanip>
+#include <filesystem>
 
 // OpenGL Graphics related
 #include <GL/glew.h>
@@ -29,7 +33,18 @@
 #include <QtGui/QMatrix2x2>
 #include <QtGui/QVector2D>
 
+// FreeImage
+#include <FreeImage.h>
+
+// STB
+#include <stb/stb_image.h>
+#include <stb/stb_image_write.h>
+
+// NumCpp
+#include <NumCpp.hpp>
+
 // Defines for the Fractal
+
 #define MIN_THREADS 1
 #define DEFAULT_THREADS 512
 #define MAX_THREADS 1024
@@ -38,6 +53,7 @@
 #define DEFAULT_POINTS 2500000
 #define MAX_POINTS 5000000
 
+using namespace std;
 //  Globals 
 int 	 rendermode;
 struct timeval time_v;
@@ -46,11 +62,13 @@ double md_time,md_time0;
 double disp_time,disp_time0;
 double timeb,time0b;
 double sock_time,sock_time0;
+static int file = 0;
 
 
 GLFWwindow* WindowID;
 bool	g_renderLoopContinue = true;
-static unsigned int winW = 1024, winH = 1024;
+bool	g_generateFractal = false;
+static unsigned int winW = 512*2, winH = 512*2;
 
 CUdevice g_devgpu;
 cudaDeviceProp g_devprop;
@@ -68,8 +86,8 @@ GLuint VertexArrayID;
 GLuint fracShaderID;
 GLuint uScaling,uTranslation,uNumMappings;
 
-QMatrix2x2 scalingMatrix;
-QVector2D  translationVector;
+//QMatrix2x2 scalingMatrix;
+//QVector2D  translationVector;
 
 typedef struct mp
 {
@@ -78,18 +96,66 @@ typedef struct mp
 	float p; // mapping probability
 } mapping;
 
+
 mapping *m_mappings;
+mapping *m_map = NULL;
 
 extern "C" void malloCUDA(mapping *);
 extern "C" void generateFractal();
 extern "C" void freeCUDA();
+extern "C" void interopCUDA();
 
  // Reserve some memory for mappings
 int numBlocks = 1;
 int blockSize = 1024;
 int numMappings = 0;
-int numPoints = 1000000;
+int numPoints = 250*1000;
 float kernel_mili = 0.0f;
+unsigned int numOfClass = 100;
+float dense = 0.2f;
+string output = "data/";
+
+
+
+
+float numPixel(){
+	
+	int count = 0;
+	float density = 0.0f;
+	int of = 0;
+
+	GLubyte *data =(GLubyte*) malloc( 3 * winW * winH);
+	glReadPixels(0, 0, winW, winH, GL_RGB, GL_UNSIGNED_BYTE, data);
+
+
+	for(int i=0;i<winW;i++){
+		of = i*winH*3;
+		for(int j=0;j<winH;j++){
+			int r,g,b;
+			r = g = b = 0;
+
+			r = (int) data[of + j*3    ];
+			g = (int) data[of + j*3 + 1];
+			b = (int) data[of + j*3 + 2];
+
+			if( (r != 0 ) || (g != 0) || (b != 0) ){
+				//cout<<r<<","<<g<<","<<b<<"  ";
+				count++;
+			}
+		}
+		
+	}
+
+	density = (float)count/((float)winW * (float)winH);
+	//cout<<endl<<"Total count: "<<count<<"\tDensity: "<<density<<endl;
+	g_generateFractal = false;
+
+	free(data);
+
+	return density;
+
+}
+
 
 
 void keyboard(GLFWwindow* window, int key, int scancode, int action, int mods)
@@ -116,8 +182,18 @@ void keyboard(GLFWwindow* window, int key, int scancode, int action, int mods)
 	   }
 
 	
-	 if(key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)
-		 g_renderLoopContinue = false;
+		if(key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)
+			g_renderLoopContinue = false;
+
+		if(key == GLFW_KEY_D){
+			g_generateFractal = true;
+			file++;
+		}
+		if(key == GLFW_KEY_A){
+			g_generateFractal = true;
+			file--;
+		}
+			
    
  }
 }
@@ -158,8 +234,8 @@ void display()
 
 	glUseProgram(fracShaderID);
 	glUniform1i(uNumMappings,numMappings);
-	glUniformMatrix2fv(uScaling,1,GL_TRUE,(float*)&scalingMatrix);
-	glUniform2fv(uTranslation,1,(float*)&translationVector);
+	//glUniformMatrix2fv(uScaling,1,GL_TRUE,(float*)&scalingMatrix);
+	//glUniform2fv(uTranslation,1,(float*)&translationVector);
 
 	// Draw Fractals
 	{
@@ -183,7 +259,7 @@ void display()
 	disp_time0 = disp_time;
 	disp_time = (time_v.tv_sec + time_v.tv_usec / 1000000.0);
 	// Draw Text
-	DrawText();
+	//DrawText();
 
 	glfwSwapBuffers(WindowID);
 	glfwPollEvents();
